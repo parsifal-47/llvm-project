@@ -165,6 +165,16 @@ static SmallVector<OpOperand *> operandsToOpOperands(OperandRange operands) {
   return opOperands;
 }
 
+// Check if any of the operations implements BranchOpInterface
+static bool anyBranchUsers(const llvm::SmallVector<mlir::Operation *> &users) {
+  for (auto user : users) {
+    if (auto subBranchOp = dyn_cast<BranchOpInterface>(user)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// Clean a simple op `op`, given the liveness analysis information in `la`.
 /// Here, cleaning means:
 ///   (1) Dropping all its uses, AND
@@ -175,23 +185,8 @@ static SmallVector<OpOperand *> operandsToOpOperands(OperandRange operands) {
 /// symbol op, a symbol-user op, a region branch op, a branch op, a region
 /// branch terminator op, or return-like.
 static void cleanSimpleOp(Operation *op, RunLivenessAnalysis &la) {
-  if (!isMemoryEffectFree(op) || hasLive(op->getResults(), la))
+  if (!isMemoryEffectFree(op) || hasLive(op->getResults(), la) || anyBranchUsers(op->getUsers()))
     return;
-
-  bool subBranching = false;
-        for (auto user : op->getUsers()) {
-                llvm::errs() << "sub op\n";
-                user->dump();
-          if (auto subBranchOp = dyn_cast<BranchOpInterface>(user)) {
-             subBranching = true;
-             break;
-          }
-        }
-
-        if (subBranching) {
-          llvm::errs() << "No clean\n";
-          return; // subBranch has to be cleaned first
-        }
 
   op->dropAllUses();
   op->erase();
@@ -609,24 +604,12 @@ static void cleanBranchOp(BranchOpInterface branchOp, RunLivenessAnalysis &la) {
     // Do (3)
     for (int argIdx = successorLiveOperands.size() - 1; argIdx >= 0; --argIdx) {
       if (!successorLiveOperands[argIdx]) {
-	bool subBranching = false;
-        for (auto user : successorBlock->getArgument(argIdx).getUsers()) {
-		llvm::errs() << "sub op\n";
-		user->dump();
-          if (auto subBranchOp = dyn_cast<BranchOpInterface>(user)) {
-	     subBranching = true;
-	     break;
- 	  }
+        if (anyBranchUsers(successorBlock->getArgument(argIdx).getUsers())) {
+          continue;
         }
 
-	if (subBranching) {
-	  llvm::errs() << "No clean\n";
-	  continue; // subBranch has to be cleaned first
-	}
-
         successorOperands.erase(argIdx);
-        //successorBlock->getArgument(argIdx).dropAllUses();
-	successorBlock->eraseArgument(argIdx);
+	      successorBlock->eraseArgument(argIdx);
       }
     }
   }

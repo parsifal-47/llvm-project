@@ -178,6 +178,21 @@ static void cleanSimpleOp(Operation *op, RunLivenessAnalysis &la) {
   if (!isMemoryEffectFree(op) || hasLive(op->getResults(), la))
     return;
 
+  bool subBranching = false;
+        for (auto user : op->getUsers()) {
+                llvm::errs() << "sub op\n";
+                user->dump();
+          if (auto subBranchOp = dyn_cast<BranchOpInterface>(user)) {
+             subBranching = true;
+             break;
+          }
+        }
+
+        if (subBranching) {
+          llvm::errs() << "No clean\n";
+          return; // subBranch has to be cleaned first
+        }
+
   op->dropAllUses();
   op->erase();
 }
@@ -594,8 +609,24 @@ static void cleanBranchOp(BranchOpInterface branchOp, RunLivenessAnalysis &la) {
     // Do (3)
     for (int argIdx = successorLiveOperands.size() - 1; argIdx >= 0; --argIdx) {
       if (!successorLiveOperands[argIdx]) {
+	bool subBranching = false;
+        for (auto user : successorBlock->getArgument(argIdx).getUsers()) {
+		llvm::errs() << "sub op\n";
+		user->dump();
+          if (auto subBranchOp = dyn_cast<BranchOpInterface>(user)) {
+	     subBranching = true;
+	     break;
+ 	  }
+        }
+
+	if (subBranching) {
+	  llvm::errs() << "No clean\n";
+	  continue; // subBranch has to be cleaned first
+	}
+
         successorOperands.erase(argIdx);
-        successorBlock->eraseArgument(argIdx);
+        //successorBlock->getArgument(argIdx).dropAllUses();
+	successorBlock->eraseArgument(argIdx);
       }
     }
   }
